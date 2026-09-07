@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --accent: #b45309;
+      --accent-dark: #92400e;
+      --bg: #fdf8f2;
+      --card: #ffffff;
+      --border: #e7dcc9;
+      --text: #2a1f14;
+      --muted: #7a6a54;
+      --ok-bg: #d9ead3;
+      --ok-text: #274e13;
+      --err-bg: #f4cccc;
+      --err-text: #7a1c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      padding-bottom: 96px;
+    }
+
+    header {
+      max-width: 560px;
+      margin: 0 auto 16px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    header .schedule {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    form {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--accent-dark);
+      margin: 0 0 10px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      font-size: 16px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(180, 83, 9, .15);
+    }
+
+    .qty-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+      gap: 10px;
+    }
+
+    .qty-grid .field label {
+      text-align: center;
+      font-weight: 600;
+      color: var(--accent-dark);
+    }
+
+    .qty-grid input {
+      text-align: center;
+      padding: 10px 4px;
+    }
+
+    .actions {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      gap: 10px;
+      max-width: 592px;
+      margin: 0 auto;
+    }
+
+    button {
+      flex: 1;
+      font-size: 16px;
+      font-weight: 600;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+    }
+
+    button#submitBtn {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button#submitBtn:disabled {
+      background: #d8bd9a;
+      cursor: not-allowed;
+    }
+
+    button#resetBtn {
+      background: #fff;
+      color: var(--accent-dark);
+      border: 1px solid var(--border);
+      flex: 0 0 auto;
+      padding: 14px 18px;
+    }
+
+    .banner {
+      max-width: 560px;
+      margin: 0 auto 16px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .banner.ok {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      display: block;
+    }
+
+    .banner.err {
+      background: var(--err-bg);
+      color: var(--err-text);
+      display: block;
+    }
+
+    .loading, .empty {
+      max-width: 560px;
+      margin: 40px auto;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>🍞 New Order</h1>
+    <div class="schedule" id="scheduleLine">Loading schedule…</div>
+  </header>
+
+  <div id="banner" class="banner"></div>
+
+  <div id="loading" class="loading">Loading form…</div>
+
+  <form id="orderForm" hidden>
+    <div class="card">
+      <h2>Customer</h2>
+      <label for="customerInput">Customer name</label>
+      <input type="text" id="customerInput" list="customerList" autocomplete="off" placeholder="Start typing…">
+      <datalist id="customerList"></datalist>
+    </div>
+
+    <div id="breadGroups"></div>
+  </form>
+
+  <div class="actions" id="actions" hidden>
+    <button type="button" id="resetBtn">Clear</button>
+    <button type="button" id="submitBtn">Add Order</button>
+  </div>
+
+  <script>
+    let breadColumns = [];
+
+    function el(tag, props, children) {
+      const node = document.createElement(tag);
+      Object.assign(node, props || {});
+      (children || []).forEach(c => node.appendChild(c));
+      return node;
+    }
+
+    function renderMeta(meta) {
+      const scheduleLine = document.getElementById('scheduleLine');
+      const parts = [];
+      if (meta.date) parts.push(meta.date);
+      if (meta.shift) parts.push(meta.shift + ' shift');
+      scheduleLine.textContent = parts.length ? parts.join(' · ') : 'Owner_List';
+
+      const customerList = document.getElementById('customerList');
+      customerList.innerHTML = '';
+      meta.customers.forEach(name => {
+        customerList.appendChild(el('option', { value: name }));
+      });
+
+      breadColumns = meta.breadColumns || [];
+      const groupsWrap = document.getElementById('breadGroups');
+      groupsWrap.innerHTML = '';
+
+      const groups = [];
+      breadColumns.forEach(col => {
+        let g = groups.find(g => g.name === col.group);
+        if (!g) { g = { name: col.group, codes: [] }; groups.push(g); }
+        g.codes.push(col.code);
+      });
+
+      groups.forEach(g => {
+        const card = el('div', { className: 'card' });
+        card.appendChild(el('h2', { textContent: g.name || 'Quantities' }));
+
+        const grid = el('div', { className: 'qty-grid' });
+        g.codes.forEach(code => {
+          const field = el('div', { className: 'field' });
+          field.appendChild(el('label', { htmlFor: 'qty_' + code, textContent: code }));
+          field.appendChild(el('input', {
+            type: 'number',
+            id: 'qty_' + code,
+            min: '0',
+            step: '1',
+            inputMode: 'numeric',
+            placeholder: '0'
+          }));
+          grid.appendChild(field);
+        });
+
+        card.appendChild(grid);
+        groupsWrap.appendChild(card);
+      });
+
+      document.getElementById('loading').hidden = true;
+      document.getElementById('orderForm').hidden = false;
+      document.getElementById('actions').hidden = false;
+    }
+
+    function showBanner(message, isError) {
+      const banner = document.getElementById('banner');
+      banner.textContent = message;
+      banner.className = 'banner ' + (isError ? 'err' : 'ok');
+    }
+
+    function clearBanner() {
+      const banner = document.getElementById('banner');
+      banner.className = 'banner';
+      banner.textContent = '';
+    }
+
+    function collectPayload() {
+      const customerName = document.getElementById('customerInput').value.trim();
+      const quantities = {};
+      breadColumns.forEach(col => {
+        const input = document.getElementById('qty_' + col.code);
+        quantities[col.code] = input.value;
+      });
+      return { customerName, quantities };
+    }
+
+    function resetForm(keepCustomer) {
+      if (!keepCustomer) document.getElementById('customerInput').value = '';
+      breadColumns.forEach(col => {
+        document.getElementById('qty_' + col.code).value = '';
+      });
+    }
+
+    function setSubmitting(isSubmitting) {
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = isSubmitting;
+      btn.textContent = isSubmitting ? 'Adding…' : 'Add Order';
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', function () {
+      clearBanner();
+      const payload = collectPayload();
+
+      if (!payload.customerName) {
+        showBanner('Please choose a customer.', true);
+        return;
+      }
+
+      setSubmitting(true);
+      google.script.run
+        .withSuccessHandler(function (result) {
+          setSubmitting(false);
+          showBanner('Order #' + result.orderId + ' added for ' + payload.customerName + '.', false);
+          resetForm(false);
+          document.getElementById('customerInput').focus();
+        })
+        .withFailureHandler(function (err) {
+          setSubmitting(false);
+          showBanner(err.message || String(err), true);
+        })
+        .submitOrder(payload);
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', function () {
+      clearBanner();
+      resetForm(false);
+      document.getElementById('customerInput').focus();
+    });
+
+    google.script.run
+      .withSuccessHandler(renderMeta)
+      .withFailureHandler(function (err) {
+        document.getElementById('loading').textContent =
+          'Could not load the form: ' + (err.message || err);
+      })
+      .getFormMeta();
+  </script>
+
+</body>
+</html>
