@@ -62,29 +62,27 @@ function onOpen() {
     .addItem('⚠️ Reset Board & Leftovers', 'resetAllStatusesAndLeftovers')
     .addSeparator()
     .addItem('Generate Next Shift Sheet', 'processLeftovers')
-    .addSeparator()
-    .addItem('Install Triggers For This File', 'setupTriggers')
     .addToUi();
 
+  // Inserting, deleting or sorting rows doesn't fire onEdit, so bring the
+  // board up to date whenever the file is opened.
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    setupTotalsRows(ss);
-
-    // If the Loading Board is empty, do the full initial build
-    const boardSheet = ss.getSheetByName("Loading_Board");
-    if (boardSheet && isBlank(boardSheet.getRange(START_ROW, 2).getValue())) {
-      rebuildLoadingBoard(ss);
-    }
+    withLock(() => {
+      setupTotalsRows(ss);
+      const customers = rebuildLoadingBoard(ss);
+      reconcileLeftoverBlocks(ss, customers);
+    });
   } catch (err) {
     console.error(err);
   }
 }
 
-function installedOnEdit(e) {
+// Simple trigger: Google runs this on every edit, in every copy of the file,
+// as the person editing. Nothing needs installing.
+function onEdit(e) {
   if (!e || !e.range) return;
 
-  // Use the spreadsheet from the event: this trigger may belong to the
-  // script of the file this one was generated from.
   const ss = e.source;
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
@@ -103,35 +101,6 @@ function installedOnEdit(e) {
       handleBoardEdit(ss, sheet, startRow, endRow, startCol, endCol);
     }
   });
-}
-
-// Inserting, deleting or sorting rows does not fire onEdit, so rebuild here.
-function installedOnChange(e) {
-  if (!e || !e.source) return;
-  if (["INSERT_ROW", "REMOVE_ROW", "OTHER"].indexOf(e.changeType) === -1) return;
-
-  withLock(() => {
-    const customers = rebuildLoadingBoard(e.source);
-    reconcileLeftoverBlocks(e.source, customers);
-  });
-}
-
-function setupTriggers() {
-  installTriggers(SpreadsheetApp.getActiveSpreadsheet());
-  showAlert("Triggers installed. Edits to this file will now update the Loading Board and Leftover tabs.");
-}
-
-function installTriggers(targetSS) {
-  const id = targetSS.getId();
-  const existing = ScriptApp.getProjectTriggers().filter(t => t.getTriggerSourceId() === id);
-  const has = handler => existing.some(t => t.getHandlerFunction() === handler);
-
-  if (!has("installedOnEdit")) {
-    ScriptApp.newTrigger("installedOnEdit").forSpreadsheet(targetSS).onEdit().create();
-  }
-  if (!has("installedOnChange")) {
-    ScriptApp.newTrigger("installedOnChange").forSpreadsheet(targetSS).onChange().create();
-  }
 }
 
 // ==========================================
@@ -739,13 +708,6 @@ function processLeftovers() {
     warnings.push(`Protections were not copied: ${err.message}`);
   }
 
-  // Automatically wire up the script triggers for the new file
-  try {
-    installTriggers(newSS);
-  } catch (err) {
-    warnings.push(`Triggers were not installed (open the new file and use Bakery Tools > Install Triggers For This File): ${err.message}`);
-  }
-
   if (emailList) {
     try {
       MailApp.sendEmail({
@@ -913,14 +875,21 @@ function nowStamp() {
   return Utilities.formatDate(new Date(), TIME_ZONE, "yyyy-MM-dd HH:mm:ss");
 }
 
-// Stops two people's edits from rebuilding the board at the same time
+// Stops two people's edits from rebuilding the board at the same time.
+// Simple triggers only get 30 seconds, so if the lock is busy for 10, carry on.
 function withLock(fn) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  let lock = null;
+  try {
+    lock = LockService.getDocumentLock();
+    if (lock && !lock.tryLock(10000)) lock = null;
+  } catch (err) {
+    lock = null;
+  }
+
   try {
     return fn();
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 

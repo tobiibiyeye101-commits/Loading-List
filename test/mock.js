@@ -167,8 +167,7 @@ function makeGlobals(ss, alerts) {
       ProtectionType: { SHEET: "SHEET", RANGE: "RANGE" }
     },
     Utilities: { formatDate, parseDate },
-    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    ScriptApp: { getProjectTriggers: () => [] },
+    LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     Session: { getEffectiveUser: () => ({}) },
     console
   };

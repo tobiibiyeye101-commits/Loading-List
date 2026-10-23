@@ -11,7 +11,7 @@ function load() {
   const ss = new Spreadsheet();
   const alerts = [];
   const context = vm.createContext(makeGlobals(ss, alerts));
-  vm.runInContext(code + "\n;this.__api = { START_ROW, STATUS, installedOnEdit, reconcileBoards, syncAllStatuses, resetAllStatusesAndLeftovers, collectCarryForward, getNextShiftInfo, rebuildLoadingBoard };", context);
+  vm.runInContext(code + "\n;this.__api = { START_ROW, STATUS, onEdit, reconcileBoards, syncAllStatuses, resetAllStatusesAndLeftovers, collectCarryForward, getNextShiftInfo, rebuildLoadingBoard };", context);
   return { ss, alerts, api: context.__api };
 }
 
@@ -34,7 +34,7 @@ function boardRows(ss) {
 function edit(api, ss, sheetName, row, col, value, numRows) {
   const sheet = ss.getSheetByName(sheetName);
   if (value !== undefined) sheet.getRange(row, col).setValue(value);
-  api.installedOnEdit({ source: ss, range: sheet.getRange(row, col, numRows || 1, 1) });
+  api.onEdit({ source: ss, range: sheet.getRange(row, col, numRows || 1, 1) });
 }
 
 function leftoverRows(ss) {
