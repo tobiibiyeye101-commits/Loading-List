@@ -16,7 +16,7 @@ Google Apps Script for the bakery loading list spreadsheet (tabs `Owner_List`, `
 | Sync All Statuses & Colors | End of shift: every customer still `Not started` becomes `Leftover`, and the Leftover tab is brought up to date. |
 | 🔄 Auto-Correct Missing Orders | Rebuilds the board from Owner_List, rewrites the totals rows and fixes the Leftover tab. Safe to run any time. |
 | ⚠️ Reset Board & Leftovers | Sets every status back to `Not started`, erases timestamps and empties the Leftover tab. Orders are kept. |
-| Generate Next Shift Sheet | Copies the file into `Loading List/<year>/<month>` in Drive for the next shift (Sunday Morning is skipped), fills its Owner_List with the unticked leftovers and emails the link to the list in Owner_List `H2`. Leftover `N2`/`O2` override the next date and shift. |
+| Generate Next Shift Sheet | First marks every `Not started` customer as `Leftover`, so nobody is missed. Then copies the file into `Loading List/<year>/<month>` in Drive for the next shift (Sunday Morning is skipped), fills its Owner_List with the unticked leftovers and emails the link to the list in Owner_List `H2`. Leftover `N2`/`O2` override the next date and shift. If a file with the same name already exists, it asks before making another copy. |
 
 ## Installing or updating
 

@@ -557,23 +557,31 @@ function syncAllStatuses() {
   let converted = 0;
 
   withLock(() => {
-    let customers = rebuildLoadingBoard(ss);
-
-    // Auto-convert "Not started" (or blank) customers to "Leftover"
-    const stamp = nowStamp();
-    const overrides = {};
-    customers.forEach(customer => {
-      if (customer.status === STATUS.NOT_STARTED) {
-        overrides[customer.key] = { status: STATUS.LEFTOVER, timestamp: stamp };
-        converted++;
-      }
-    });
-
-    if (converted > 0) customers = rebuildLoadingBoard(ss, overrides);
-    reconcileLeftoverBlocks(ss, customers);
+    converted = convertNotStartedToLeftover(ss);
   });
 
   showAlert(`Sync Complete! ${converted} 'Not started' customer(s) were converted to Leftovers, and all tabs are fully updated.`);
+}
+
+// Turns every "Not started" customer into "Leftover" and brings the Leftover
+// tab up to date. Returns how many customers were converted.
+// Callers must hold the lock.
+function convertNotStartedToLeftover(ss) {
+  let customers = rebuildLoadingBoard(ss);
+
+  const stamp = nowStamp();
+  const overrides = {};
+  let converted = 0;
+  customers.forEach(customer => {
+    if (customer.status === STATUS.NOT_STARTED) {
+      overrides[customer.key] = { status: STATUS.LEFTOVER, timestamp: stamp };
+      converted++;
+    }
+  });
+
+  if (converted > 0) customers = rebuildLoadingBoard(ss, overrides);
+  reconcileLeftoverBlocks(ss, customers);
+  return converted;
 }
 
 function reconcileBoards() {
@@ -652,6 +660,28 @@ function processLeftovers() {
     return;
   }
 
+  const newFileName = `Loading List - ${nextInfo.dayShort} - ${nextInfo.dateText} - ${nextInfo.shift}`;
+
+  // Ask before making a second file with the same name
+  if (DriveApp.getFilesByName(newFileName).hasNext()) {
+    const ui = SpreadsheetApp.getUi();
+    const answer = ui.alert(
+      "A loading list with this name already exists",
+      `"${newFileName}" already exists. Create another copy with the same name?`,
+      ui.ButtonSet.YES_NO
+    );
+    if (answer !== ui.Button.YES) {
+      showAlert("Cancelled. No new loading list was created.");
+      return;
+    }
+  }
+
+  // Mark "Not started" customers as Leftover first, so none are missed
+  let converted = 0;
+  withLock(() => {
+    converted = convertNotStartedToLeftover(ss);
+  });
+
   // Collect the leftovers before copying
   const lastLeftoverRow = leftoverSheet.getLastRow();
   const leftoverValues = lastLeftoverRow >= LEFTOVER_START_ROW
@@ -660,6 +690,9 @@ function processLeftovers() {
   let carryRows = collectCarryForward(leftoverValues);
 
   const warnings = [];
+  if (converted > 0) {
+    warnings.push(`${converted} 'Not started' customer(s) were marked Leftover before the copy.`);
+  }
   if (carryRows.length > NUM_ROWS) {
     warnings.push(`Only the first ${NUM_ROWS} of ${carryRows.length} leftovers fit on the new Owner_List.`);
     carryRows = carryRows.slice(0, NUM_ROWS);
@@ -670,7 +703,6 @@ function processLeftovers() {
   const yearFolder = getOrCreateFolder(rootFolder, nextInfo.year);
   const monthFolder = getOrCreateFolder(yearFolder, nextInfo.monthName);
 
-  const newFileName = `Loading List - ${nextInfo.dayShort} - ${nextInfo.dateText} - ${nextInfo.shift}`;
   const newFile = DriveApp.getFileById(ss.getId()).makeCopy(newFileName, monthFolder);
   const newSS = SpreadsheetApp.openById(newFile.getId());
 

@@ -108,7 +108,7 @@ test("Leftover blocks follow the merged board and keep Taken amounts", () => {
     ["Bravo", "Order"], ["", "Taken"], ["", "Leftover"]
   ], "blocks are in board order");
   assert.strictEqual(rows[0][3], 15, "Order row holds the merged quantity");
-  assert.strictEqual(rows[2][3], '=IF(D10="","",D10-IF(D11="",0,D11))');
+  assert.strictEqual(rows[2][3], 15, "Leftover = Order minus Taken (Taken is blank)");
   assert.strictEqual(rows[2][15], false, "carry-forward checkbox");
 
   // Type a Taken amount, then add another Alpha order
@@ -194,6 +194,117 @@ test("next shift dates", () => {
 
   next = api.getNextShiftInfo(lagosMidnight("2026-10-24"), "Night", tz);
   assert.deepStrictEqual([next.dayShort, next.dateText, next.shift], ["Sun", "2026-10-25", "Night"], "Sunday Morning is skipped");
+});
+
+// ---- Generate Next Shift Sheet ----
+function fakeDrive(existingNames) {
+  const created = [];
+  const iter = items => ({ hasNext: () => items.length > 0, next: () => items.shift() });
+  const copies = {};
+  return {
+    created,
+    copies,
+    DriveApp: {
+      getFoldersByName: () => iter([]),
+      createFolder: name => {
+        const folder = { getFoldersByName: () => iter([]), createFolder: n => ({ name: n, getFoldersByName: () => iter([]), createFolder() {} }), name, getFilesByName: () => iter([]) };
+        created.push(name);
+        return folder;
+      },
+      getFilesByName: name => iter(existingNames.includes(name) ? [{ getName: () => name }] : []),
+      getFileById: () => ({
+        makeCopy: (name, folder) => {
+          const id = `copy-${Object.keys(copies).length + 1}`;
+          copies[id] = { name, folder, ss: null };
+          return { getId: () => id, getUrl: () => `https://example.test/${id}` };
+        }
+      })
+    }
+  };
+}
+
+function cloneSpreadsheet(src) {
+  const dst = new Spreadsheet();
+  Object.keys(src.sheets).forEach(name => {
+    const from = src.sheets[name];
+    const to = dst.sheets[name];
+    to.rows = JSON.parse(JSON.stringify(from.rows));
+    to.maxRows = from.maxRows;
+    to.bg = { ...from.bg };
+  });
+  return dst;
+}
+
+function loadForGenerate(answers) {
+  const ss = new Spreadsheet();
+  const alerts = [];
+  const drive = fakeDrive(answers.existing || []);
+  const g = makeGlobals(ss, alerts);
+  g.SpreadsheetApp.getUi = () => ({
+    alert: (...args) => { alerts.push(args[0]); return answers.button || "YES"; },
+    ButtonSet: { YES_NO: "YES_NO" },
+    Button: { YES: "YES", NO: "NO" }
+  });
+  g.SpreadsheetApp.openById = id => drive.copies[id].ss;
+  g.DriveApp = drive.DriveApp;
+  g.MailApp = { sendEmail() {} };
+  const ctx = vm.createContext(g);
+  vm.runInContext(code + "\n;this.api={processLeftovers,reconcileBoards,onEdit}", ctx);
+  // Dates must come from the script's own realm, or `instanceof Date` fails
+  const setShift = () => {
+    const o = ss.getSheetByName("Owner_List");
+    o.getRange("A1").setValue(vm.runInContext("new Date('2026-10-23T00:00:00+01:00')", ctx));
+    o.getRange("B1").setValue("Morning");
+  };
+  // Make copies usable: the copy becomes a clone of the source when made
+  const origCopy = drive.DriveApp.getFileById;
+  drive.DriveApp.getFileById = id => {
+    const f = origCopy(id);
+    return {
+      makeCopy: (name, folder) => {
+        const copyFile = f.makeCopy(name, folder);
+        drive.copies[copyFile.getId()].ss = cloneSpreadsheet(ss);
+        return copyFile;
+      }
+    };
+  };
+  return { ss, alerts, drive, api: ctx.api, setShift };
+}
+
+test("Generate marks Not started customers as Leftover before carrying forward", () => {
+  const { ss, alerts, drive, api, setShift } = loadForGenerate({});
+  fillOwner(ss, [order(1, "Alpha", { 0: 10 }), order(2, "Bravo", { 0: 20 })]);
+  api.reconcileBoards();
+  edit(api, ss, "Loading_Board", 8, 15, "Done");        // Alpha is done
+  // Bravo stays Not started; the owner date/shift are set
+  setShift();
+
+  api.processLeftovers();
+
+  const copy = Object.values(drive.copies)[0].ss;
+  const next = copy.getSheetByName("Owner_List").getRange(8, 1, 1, 17).getValues()[0];
+  assert.strictEqual(next[1], "Bravo", "Not started customer carried forward");
+  assert.strictEqual(next[2], 20);
+  assert.strictEqual(ss.getSheetByName("Owner_List").getRange(9, 15).getValue(), "Leftover", "source file marked Leftover");
+  assert.match(alerts[alerts.length - 1], /1 'Not started' customer\(s\) were marked Leftover/);
+});
+
+test("Generate asks before creating a second file with the same name", () => {
+  const name = "Loading List - Fri - 2026-10-23 - Night";
+  const cancelled = loadForGenerate({ existing: [name], button: "NO" });
+  fillOwner(cancelled.ss, [order(1, "Alpha", { 0: 10 })]);
+  cancelled.setShift();
+  cancelled.api.processLeftovers();
+  assert.strictEqual(cancelled.alerts.length, 2, "asked, then said cancelled");
+  assert.match(cancelled.alerts[1], /Cancelled/);
+  assert.strictEqual(Object.keys(cancelled.drive.copies).length, 0, "no copy made when cancelled");
+  assert.strictEqual(cancelled.ss.getSheetByName("Owner_List").getRange(8, 15).getValue(), "", "source untouched on cancel");
+
+  const confirmed = loadForGenerate({ existing: [name], button: "YES" });
+  fillOwner(confirmed.ss, [order(1, "Alpha", { 0: 10 })]);
+  confirmed.setShift();
+  confirmed.api.processLeftovers();
+  assert.strictEqual(Object.keys(confirmed.drive.copies).length, 1, "copy made when confirmed");
 });
 
 let failed = 0;

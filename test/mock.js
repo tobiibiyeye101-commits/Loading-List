@@ -82,7 +82,23 @@ class Sheet {
     this.maxRows = maxRows || 200;
   }
   getName() { return this.name; }
-  get(row, col) { return (this.rows[row - 1] || [])[col - 1] ?? ""; }
+  get(row, col) {
+    const value = (this.rows[row - 1] || [])[col - 1] ?? "";
+    return typeof value === "string" ? this.calc(value) : value;
+  }
+  // Works out the Leftover formula the script writes: =IF(X="","",X-IF(Y="",0,Y))
+  calc(value) {
+    const m = /^=IF\(([A-Z]+\d+)="","",\1-IF\(([A-Z]+\d+)="",0,\2\)\)$/.exec(value);
+    if (!m) return value;
+    const at = ref => {
+      const c = /^([A-Z]+)(\d+)$/.exec(ref);
+      return this.get(Number(c[2]), colToNumber(c[1]));
+    };
+    const order = at(m[1]);
+    if (order === "") return "";
+    const taken = at(m[2]);
+    return Number(order) - (taken === "" ? 0 : Number(taken));
+  }
   set(row, col, v) {
     if (row > this.maxRows) throw new Error(`Row ${row} is past the end of ${this.name}`);
     while (this.rows.length < row) this.rows.push([]);
